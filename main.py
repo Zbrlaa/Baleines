@@ -3,12 +3,13 @@ from scipy.signal import find_peaks
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import correlate
+from scipy.signal import resample
 
 
-audios = ["ONECAT_20200114_150201_247",
-	"S70_20200114_150211_982"]
+audios = ["ONECAT_20200114_150201_247", "S70_20200114_150211_982"]
 
 intervalles = []
+intervalles_resampled = []
 
 for audio in audios :
 	sample_rate, data = wavfile.read("/home/partage/M2IPA/meute/" + audio + ".wav")
@@ -87,15 +88,35 @@ for audio in audios :
 	name = "All PPS : " + audio
 	plt.savefig(name)
 
-	intervalles.append(np.diff(indices_pps))
+	intervalle = np.diff(indices_pps)
+	intervalles.append(intervalle)
+
+	mean_inter = np.mean(intervalle)
+
+	factor = sample_rate / mean_inter
+	print("Facteur de resampling (simple):", factor)
+
+	n_target = int(np.round(n_samples * factor))
+	resampled = resample(canal, n_target)
+
+	corr = correlate(atome, resampled, mode='valid')
+	corr /= np.max(np.abs(corr))
+	indices_pps_resampled, _ = find_peaks(corr, height=seuil_corr)
+
+	intervalles_resampled.append(np.diff(indices_pps_resampled))
+
 
 plt.figure(figsize=(10,4))
 plt.scatter(range(1, len(intervalles[0])+1), intervalles[0], marker='.', color='r', label=audios[0])
 plt.scatter(range(1, len(intervalles[1])+1), intervalles[1], marker='.', color='b', label=audios[1])
+plt.scatter(range(1, len(intervalles_resampled[0])+1), intervalles_resampled[0], marker='x', color='r', label="resample "+audios[0])
+plt.scatter(range(1, len(intervalles_resampled[1])+1), intervalles_resampled[1], marker='x', color='b', label="resample "+audios[0])
+
+
 plt.axhline(y=sample_rate, color='green', linestyle='--', label=f'sample_rate={sample_rate}')
 plt.xlabel("Intervalle n°")
 plt.ylabel("Nombre d'échantillons")
 plt.title("Intervalle entre chaque PPS")
-plt.ylim(bottom=350000, top=400000)  # ordonnée commence à 0
+plt.ylim(bottom=350000, top=400000)
 plt.legend()
 plt.savefig("Intervalles")
