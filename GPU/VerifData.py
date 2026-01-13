@@ -7,7 +7,7 @@ import os
 # Configuration
 data_dir = "/scratch/Shawn/data_processed/"
 sample_rate_target = 384000
-npy_files = sorted(glob.glob(os.path.join(data_dir, "data_ONECAT_*.npy")))[:10]
+npy_files = sorted(glob.glob(os.path.join(data_dir, "data_S70_*.npy")))[:10]
 
 plt.figure(figsize=(12, 6))
 
@@ -23,7 +23,9 @@ for i, npy_path in enumerate(npy_files):
 	
 	# Détection des PPS (Pics d'amplitude sur le canal 5 corrigé)
 	# On cherche des pics espacés d'environ 1 seconde (384 000 samples)
-	peaks, _ = find_peaks(np.abs(canal5), height=0.7, distance=300000)
+	# peaks, _ = find_peaks(np.abs(canal5), height=0.7, distance=300000)
+	seuil_verif = 10 * np.median(np.abs(canal5))
+	peaks, _ = find_peaks(np.abs(canal5), height=seuil_verif, distance=300000)
 	
 	intervalles = np.diff(peaks)
 	moyenne = np.mean(intervalles)

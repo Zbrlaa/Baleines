@@ -4,7 +4,7 @@ from sklearn.cluster import DBSCAN
 import pandas as pd
 
 # 1. Chargement et préparation des données
-data_raw = np.load("/scratch/Shawn/tdoa_results.npy")
+data_raw = np.load("/scratch/Shawn/tdoa_results_s70.npy")
 # Structure supposée : [nom_fichier, clic_index, canal_id, delta_t]
 df = pd.DataFrame(data_raw, columns=['file', 'clic_idx', 'channel', 'dt'])
 df[['clic_idx', 'channel', 'dt']] = df[['clic_idx', 'channel', 'dt']].apply(pd.to_numeric)
@@ -23,7 +23,8 @@ df_pivot['time'] = df_pivot['file'].map(file_map) + (df_pivot['clic_idx'] / 3840
 # On cluster sur les 3 TDOA (canaux 1, 2, 3)
 # eps est la distance maximale entre deux clics pour qu'ils soient de la même baleine
 X = df_pivot[[1, 2, 3]].values
-db = DBSCAN(eps=10, min_samples=60).fit(X) # Ajuste eps selon tes résultats
+# db = DBSCAN(eps=8, min_samples=60).fit(X) # Ajuste eps selon tes résultats
+db = DBSCAN(eps=10, min_samples=20).fit(X)
 df_pivot['whale_id'] = db.labels_
 
 # 5. Visualisation
@@ -35,7 +36,7 @@ plt.xlabel("Temps (secondes)")
 plt.ylabel("Délai TDOA (échantillons)")
 plt.title(f"Détection des trajectoires : {len(set(db.labels_)) - (1 if -1 in db.labels_ else 0)} baleines estimées")
 plt.grid(True, alpha=0.3)
-plt.savefig("Trajectoires_Baleines.png")
+plt.savefig("Trajectoires_Baleines_s70.png")
 
 n_whales = len(set(db.labels_)) - (1 if -1 in db.labels_ else 0)
 print(f"Nombre de baleines estimées par clustering : {n_whales}")

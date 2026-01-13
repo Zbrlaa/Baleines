@@ -12,50 +12,78 @@ def highpass_filter_gpu(sig, sr, cutoff=10000, order=5):
 # Configuration
 SR = 384000
 data_dir = "/scratch/Shawn/data_processed/"
-npy_files = sorted(glob.glob(os.path.join(data_dir, "data_ONECAT_*.npy")))
+# On cible bien les fichiers S70
+npy_files = sorted(glob.glob(os.path.join(data_dir, "data_S70_*.npy")))
+
+# --- PARAMÈTRES "HAUTE SENSIBILITÉ" POUR S70 ---
+SEUIL_MULTIPLICATEUR = 7   # On divise par deux pour capter les clics faibles
+SCORE_CORR_MIN = 0.30       # Un peu plus tolérant sur la forme du clic
+# ----------------------------------------------
 
 all_results = []
 
 for npy_path in npy_files:
-	print(f"Analyse des clics : {os.path.basename(npy_path)}")
-	data = cp.load(npy_path)
+	print(f"Analyse sensible de {os.path.basename(npy_path)}...")
+	data_raw = cp.load(npy_path)
 	
-	# Filtrage canal 0
-	filt0 = highpass_filter_gpu(data[:, 0], SR)
-	sig_abs = cp.abs(filt0)
+	# Filtrage de tous les canaux
+	data_filt = cp.zeros_like(data_raw)
+	for ch in range(4):
+		data_filt[:, ch] = highpass_filter_gpu(data_raw[:, ch], SR)
 	
-	# --- SEUIL ADAPTATIF ---
-	# On calcule la médiane du signal absolu (très robuste au bruit)
-	# Un clic est typiquement 10 à 15 fois plus fort que le bruit médian
-	bruit_median = cp.median(sig_abs)
-	seuil_adaptatif = 12 * bruit_median # Ajuste le multiplicateur (12) si besoin
+	# Détection sur le canal 0
+	sig_abs0 = cp.abs(data_filt[:, 0])
+	bruit_median = cp.median(sig_abs0)
+	seuil_adaptatif = SEUIL_MULTIPLICATEUR * bruit_median
 	
-	indices = cp.where(sig_abs > seuil_adaptatif)[0].get()
+	indices = cp.where(sig_abs0 > seuil_adaptatif)[0].get()
 	
-	# Tri des clics
-	clics = []
+	# Tri des clics (2ms)
+	clics_candidats = []
 	prev = -9999
 	for idx in indices:
 		if idx - prev > int(0.002 * SR):
-			clics.append(idx)
+			clics_candidats.append(idx)
 		prev = idx
 
-	print(f"   -> {len(clics)} clics détectés")
+	clics_valides = 0
+	scores_clics = []
 
-	# Calcul des TDOA (Inter-corrélation)
-	for clic in clics:
-		if clic < 1000 or clic > len(filt0) - 2000: continue
+	for clic in clics_candidats:
+		if clic < 1000 or clic > len(data_filt) - 2000: continue
 		
-		start, end = clic-100, clic+500
-		motif = filt0[start:end]
+		motif = data_filt[clic-100:clic+500, 0]
+		motif_norm = motif / cp.sqrt(cp.sum(motif**2))
+		
+		clic_data_tmp = []
+		qualite_clic = True
+		scores_canaux = []
 		
 		for i in range(1, 4):
-			sig_chan = data[clic-1000:clic+2000, i]
-			corr = gpucorrelate(sig_chan, motif, mode='valid')
+			sig_chan = data_filt[clic-1000:clic+2000, i]
+			sig_chan_norm = sig_chan / cp.sqrt(cp.sum(sig_chan**2))
+			
+			corr = gpucorrelate(sig_chan_norm, motif_norm, mode='valid')
+			score = float(cp.max(cp.abs(corr)).get())
+			scores_canaux.append(score)
+			
+			if score < SCORE_CORR_MIN:
+				qualite_clic = False
+				break
+			
 			delta_t = int(cp.argmax(cp.abs(corr)).get()) - 1000
-			all_results.append([npy_path, clic, i, delta_t])
+			clic_data_tmp.append([clic, i, delta_t])
+		
+		if qualite_clic:
+			for item in clic_data_tmp:
+				all_results.append([npy_path, item[0], item[1], item[2]])
+			clics_valides += 1
+			scores_clics.append(np.mean(scores_canaux))
 
-# Sauvegarde des résultats finaux sur le scratch
+	avg_score = np.mean(scores_clics) if scores_clics else 0
+	print(f"   -> {clics_valides} clics retenus / {len(clics_candidats)} candidats (Score moy: {avg_score:.2f})")
+
+# Sauvegarde spécifique pour S70
 results_arr = np.array(all_results)
-np.save("/scratch/Shawn/tdoa_results.npy", results_arr)
-print("Analyse terminée. Résultats sauvegardés dans /scratch/Shawn/tdoa_results.npy")
+np.save("/scratch/Shawn/tdoa_results_s70.npy", results_arr)
+print(f"\nTerminé. Résultats S70 sauvegardés dans tdoa_results_s70.npy")
